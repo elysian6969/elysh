@@ -1,0 +1,22 @@
+[package]
+edition = "2021"
+name = "elysh"
+version = "0.0.0"
+
+[dependencies.cream]
+path = "../cream"
+#git = "https://github.com/mov-rax-rax/cream"
+
+[dependencies.fst]
+features = ["levenshtein"]
+version = "0.4"
+
+[dependencies.libc]
+version = "0.2"
+
+[dependencies.termios]
+version = "0.3"
+
+[dependencies.tokio]
+features = ["fs", "io-util", "macros", "net", "process", "rt", "signal", "time"]
+version = "1.17"
