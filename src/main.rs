@@ -236,11 +236,13 @@ async fn main() -> io::Result<()> {
                 if program == "cd" {
                     if let Some(dir) = args.next() {
                         let _ = std::env::set_current_dir(dir);
-
-                        session.write_all(b"\x1b[A").await?;
-                        let status = before_prompt().await;
-                        session.write_str_all(&status).await?;
+                    } else if let Some(home) = env::var_os("HOME") {
+                        let _ = std::env::set_current_dir(home);
                     }
+
+                    session.write_all(b"\x1b[A").await?;
+                    let status = before_prompt().await;
+                    session.write_str_all(&status).await?;
                 } else {
                     session.write_all(b"\n\r").await?;
                     session.set_cooked()?;

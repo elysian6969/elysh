@@ -1,10 +1,10 @@
 use fst::automaton::Str;
 use fst::{Automaton, IntoStreamer, Set};
 use std::collections::BTreeMap;
+use std::env;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
-use std::{env};
 use tokio::{fs, io};
 
 /// A map of executables.
