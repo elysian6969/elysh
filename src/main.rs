@@ -149,7 +149,8 @@ async fn main() -> io::Result<()> {
                     program = Some(mem::take(&mut buffer));
                 }
             }
-            Input::ArrowRight | Input::Tab => {
+            // tab is ctrl+i???
+            Input::ArrowRight | Input::Ctrl('i') => {
                 if let Summary::Partial(partial) = &summary {
                     buffer = partial.clone().into();
                 }
