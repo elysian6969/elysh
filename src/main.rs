@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![feature(str_split_whitespace_as_str)]
 
 use buffer::Buffer;
@@ -34,7 +35,7 @@ async fn before_prompt() -> String {
         Err(_) => return "<unknown>".into(),
     };
 
-    let mut display = home()
+    let display = home()
         .await
         .and_then(|home| {
             let stripped = dir.strip_prefix(home).ok()?.display().to_string();

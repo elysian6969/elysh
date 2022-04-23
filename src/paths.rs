@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
-use std::{env, iter};
+use std::{env};
 use tokio::{fs, io};
 
 /// A map of executables.
