@@ -261,7 +261,14 @@ async fn main() -> io::Result<()> {
             if let Some((program, mut args)) = program.split_program() {
                 if program == "cd" {
                     if let Some(dir) = args.next() {
-                        let _ = std::env::set_current_dir(dir);
+                        let dir = match env::var("HOME").ok() {
+                            Some(home) => dir.replace("~", &home),
+                            None => dir.to_string(),
+                        };
+
+                        if tokio::fs::metadata(&dir).await.is_ok() {
+                            let _ = std::env::set_current_dir(dir);
+                        }
                     } else if let Some(home) = env::var_os("HOME") {
                         let _ = std::env::set_current_dir(home);
                     }
@@ -281,8 +288,13 @@ async fn main() -> io::Result<()> {
                             Err(error) => Err(error),
                         },
                         Err(error) => {
-                            if tokio::fs::metadata(program).await.is_ok() {
-                                let _ = std::env::set_current_dir(program);
+                            let dir = match env::var("HOME").ok() {
+                                Some(home) => program.replace("~", &home),
+                                None => program.to_string(),
+                            };
+
+                            if tokio::fs::metadata(&dir).await.is_ok() {
+                                let _ = std::env::set_current_dir(dir);
 
                                 session.set_raw()?;
                                 session.set_nonblocking()?;
@@ -291,7 +303,6 @@ async fn main() -> io::Result<()> {
                                 let status = before_prompt().await;
                                 session.write_str_all(&status).await?;
 
-                                //Ok(())
                                 continue;
                             } else {
                                 Err(error)
