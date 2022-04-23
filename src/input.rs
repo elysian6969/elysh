@@ -7,9 +7,7 @@ pub enum Input {
     ArrowDown,
     ArrowRight,
     ArrowLeft,
-    Return,
     Backspace,
-    Tab,
     Space,
     Ctrl(char),
 }
@@ -29,7 +27,6 @@ pub fn map(bytes: &[u8]) -> Option<Input> {
                     Input::Key(character)
                 }
             }
-            _ => return None,
         },
         3 => match unsafe { bytes.get_unchecked(..3) } {
             b"\x1b[A" => Input::ArrowUp,
