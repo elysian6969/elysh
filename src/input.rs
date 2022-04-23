@@ -18,7 +18,6 @@ pub fn map(bytes: &[u8]) -> Option<Input> {
     let input = match bytes.len() {
         1 => match unsafe { bytes.get_unchecked(0) } {
             code @ 1..=26 => Input::Ctrl((code - 1 + b'a') as char),
-            13 => Input::Return,
             127 => Input::Backspace,
             b' ' => Input::Space,
             b'\t' => Input::Tab,

@@ -111,6 +111,9 @@ async fn main() -> io::Result<()> {
             None => continue,
         };
 
+        let dbg = format!("\x1b[s\x1b[2;1H\x1b[2K{input:?}\x1b[u");
+        session.write_all(dbg.as_bytes()).await?;
+
         match input {
             Input::ArrowUp => {
                 history.next();
@@ -140,7 +143,8 @@ async fn main() -> io::Result<()> {
             }
             Input::Ctrl('c') => buffer.clear(),
             Input::Ctrl('d') => break,
-            Input::Return => {
+            // return is ctrl-m???
+            Input::Ctrl('m') => {
                 if !buffer.is_empty() {
                     program = Some(mem::take(&mut buffer));
                 }
