@@ -113,9 +113,12 @@ async fn main() -> io::Result<()> {
             let write = match &summary {
                 Summary::Exact => {
                     let rest = args.as_str();
-                    let space = if buffer[buffer.len().saturating_sub(rest.len())..]
+                    let space = if buffer
+                        .as_str()
+                        .strip_suffix(rest)
+                        .unwrap_or("")
                         .chars()
-                        .next()
+                        .next_back()
                         .map(|character| character.is_whitespace())
                         .unwrap_or(false)
                     {
