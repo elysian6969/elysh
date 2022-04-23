@@ -113,6 +113,16 @@ async fn main() -> io::Result<()> {
             let write = match &summary {
                 Summary::Exact => {
                     let rest = args.as_str();
+                    let space = if buffer[buffer.len().saturating_sub(rest.len())..]
+                        .chars()
+                        .next()
+                        .map(|character| character.is_whitespace())
+                        .unwrap_or(false)
+                    {
+                        " "
+                    } else {
+                        ""
+                    };
 
                     Line::new()
                         .clear_line()
@@ -121,7 +131,7 @@ async fn main() -> io::Result<()> {
                         .red()
                         .push(program)
                         .reset()
-                        .push(' ')
+                        .push(space)
                         .push(rest)
                 }
                 Summary::Partial(partial) => {
@@ -165,9 +175,6 @@ async fn main() -> io::Result<()> {
             Some(input) => input,
             None => continue,
         };
-
-        let dbg = format!("\x1b[s\x1b[2;1H\x1b[2K{input:?}\x1b[u");
-        session.write_all(dbg.as_bytes()).await?;
 
         match input {
             Input::ArrowUp => {
@@ -228,10 +235,6 @@ async fn main() -> io::Result<()> {
             history.reset();
             history.push(program_clone.into());
 
-            let test = program.split_program();
-            let dbg = format!("\x1b[s\x1b[3;1H\x1b[2K{test:?}\x1b[u");
-            session.write_all(dbg.as_bytes()).await?;
-
             if let Some((program, mut args)) = program.split_program() {
                 if program == "cd" {
                     if let Some(dir) = args.next() {
@@ -270,9 +273,6 @@ async fn main() -> io::Result<()> {
                 }
             }
         }
-
-        let dbg = format!("\x1b[s\x1b[1;1H\x1b[2K{history:?}\x1b[u");
-        session.write_all(dbg.as_bytes()).await?;
     }
 
     session.write_all(b"\n").await?;
