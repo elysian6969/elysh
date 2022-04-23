@@ -49,12 +49,18 @@ impl History {
         match self.position.cmp(&0) {
             Ordering::Greater => {
                 // SAFETY: self.position is always valid.
-                Some(unsafe { self.history.get_unchecked(self.position as usize - 1) })
+                Some(unsafe {
+                    self.history
+                        .get_unchecked(self.len().saturating_sub(self.position as usize))
+                })
             }
             Ordering::Equal => None,
             Ordering::Less => {
                 // SAFETY: self.position is always valid.
-                Some(unsafe { self.history.get_unchecked(self.position.abs() as usize - 1) })
+                Some(unsafe {
+                    self.history
+                        .get_unchecked(self.len().saturating_sub(self.position.abs() as usize))
+                })
             }
         }
     }
