@@ -15,6 +15,36 @@ mod input;
 mod paths;
 mod session;
 
+use std::path::PathBuf;
+
+async fn home() -> Option<PathBuf> {
+    use tokio::fs;
+
+    let home = env::var_os("HOME")?;
+    let home = fs::canonicalize(home).await.ok()?;
+
+    Some(home)
+}
+
+async fn before_prompt() -> String {
+    let dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(_) => return "<unknown>".into(),
+    };
+
+    let mut display = home()
+        .await
+        .and_then(|home| {
+            let stripped = dir.strip_prefix(home).ok()?.display().to_string();
+            let seperator = if stripped.is_empty() { "" } else { "/" };
+
+            Some(format!("~{seperator}{stripped}"))
+        })
+        .unwrap_or_else(|| dir.display().to_string());
+
+    format!("\r\x1b[K {}\n\r", display)
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
     let tty = OpenOptions::new()
@@ -39,8 +69,7 @@ async fn main() -> io::Result<()> {
     let executables = Executables::new(&executables);
     let mut program = None;
 
-    let current_dir = env::current_dir()?;
-    let status = format!(" {}\n\r", current_dir.display());
+    let status = before_prompt().await;
     session.write_str_all(&status).await?;
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -180,6 +209,10 @@ async fn main() -> io::Result<()> {
                 if program == "cd" {
                     if let Some(dir) = args.next() {
                         let _ = std::env::set_current_dir(dir);
+
+                        session.write_all(b"\x1b[A").await?;
+                        let status = before_prompt().await;
+                        session.write_str_all(&status).await?;
                     }
                 } else {
                     session.write_all(b"\n\r").await?;
@@ -202,9 +235,8 @@ async fn main() -> io::Result<()> {
                     session.set_raw()?;
                     session.set_nonblocking()?;
 
-                    session.write_all(b"\n\r").await?;
-                    let current_dir = env::current_dir()?;
-                    let status = format!(" {}\n", current_dir.display());
+                    session.write_all(b"\n").await?;
+                    let status = before_prompt().await;
                     session.write_str_all(&status).await?;
                 }
             }
