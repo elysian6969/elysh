@@ -1,3 +1,5 @@
+#![feature(str_split_whitespace_as_str)]
+
 use buffer::Buffer;
 use history::History;
 use input::Input;
@@ -63,20 +65,35 @@ async fn main() -> io::Result<()> {
     }
 
     loop {
-        let executable = executables.search_one(&buffer);
-        let summary = match executable {
-            Some(executable) => {
-                if buffer.as_str() == executable {
-                    Summary::Exact
-                } else {
-                    Summary::Partial(executable)
+        let buffer2 = buffer.as_str();
+        let mut args = buffer2.split_whitespace();
+
+        let summary = if let Some(program) = args.next() {
+            let executable = executables.search_one(&program);
+            let summary = match executable {
+                Some(executable) => {
+                    if program == executable {
+                        Summary::Exact
+                    } else {
+                        Summary::Partial(executable)
+                    }
                 }
-            }
-            None => Summary::NoMatch,
+                None => Summary::NoMatch,
+            };
+
+            summary
+        } else {
+            Summary::NoMatch
         };
 
+        let mut args = buffer2.split_whitespace();
         let write = match &summary {
-            Summary::Exact => format!("\r\x1b[K{prompt} \x1b[38;5;1m{buffer}\x1b[m"),
+            Summary::Exact => {
+                let program = unsafe { args.next().unwrap_unchecked() };
+                let rest = args.as_str();
+
+                format!("\r\x1b[K{prompt} \x1b[38;5;1m{program}\x1b[m {rest}")
+            },
             Summary::Partial(partial) => {
                 let rem = unsafe { partial.strip_prefix(buffer.as_str()).unwrap_unchecked() };
                 let len = rem.len();
@@ -141,37 +158,44 @@ async fn main() -> io::Result<()> {
 
         if let Some(program) = program.take() {
             let program_clone = program.clone();
+
+            history.reset();
+            history.push(program_clone.into());
+
             let args = program.as_str();
             let mut args = args.split_whitespace();
 
             if let Some(program) = args.next() {
-                session.write_all(b"\n\r").await?;
-                session.set_cooked()?;
-                session.set_blocking()?;
-
-                let result = Command::new(program).args(args).spawn();
-                let result = match result {
-                    Ok(mut child) => match child.wait().await {
-                        Ok(_status) => Ok(()),
-                        Err(error) => Err(error),
-                    },
-                    Err(error) => Err(error),
-                };
-
-                if let Err(_result) = result {
-                    session.write_all(b"\rchild process died\n\r").await?;
+                if program == "cd" {
+                    if let Some(dir) = args.next() {
+                        let _ = std::env::set_current_dir(dir);
+                    }
                 } else {
-                    history.reset();
-                    history.push(program_clone.into());
+                    session.write_all(b"\n\r").await?;
+                    session.set_cooked()?;
+                    session.set_blocking()?;
+
+                    let result = Command::new(program).args(args).spawn();
+                    let result = match result {
+                        Ok(mut child) => match child.wait().await {
+                            Ok(_status) => Ok(()),
+                            Err(error) => Err(error),
+                        },
+                        Err(error) => Err(error),
+                    };
+
+                    if let Err(_result) = result {
+                        session.write_all(b"\rchild process died\n\r").await?;
+                    }
+
+                    session.set_raw()?;
+                    session.set_nonblocking()?;
+
+                    session.write_all(b"\n\r").await?;
+                    let current_dir = env::current_dir()?;
+                    let status = format!(" {}\n", current_dir.display());
+                    session.write_str_all(&status).await?;
                 }
-
-                session.set_raw()?;
-                session.set_nonblocking()?;
-
-                session.write_all(b"\n\r").await?;
-                let current_dir = env::current_dir()?;
-                let status = format!(" {}\n", current_dir.display());
-                session.write_str_all(&status).await?;
             }
         }
     }
