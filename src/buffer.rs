@@ -53,7 +53,7 @@ impl Buffer {
             return;
         }
 
-        if self.column == self.len() {
+        if self.is_at_end() {
             self.buffer.pop();
         } else {
             self.buffer.remove(
@@ -80,6 +80,14 @@ impl Buffer {
         let program = args.next()?;
 
         Some((program, args))
+    }
+
+    pub fn is_at_start(&self) -> bool {
+        self.column == 0
+    }
+
+    pub fn is_at_end(&self) -> bool {
+        self.column == self.len()
     }
 
     pub fn move_to_start(&mut self) {

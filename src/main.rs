@@ -224,7 +224,18 @@ async fn main() -> io::Result<()> {
                 }
             }
             Input::ArrowLeft => buffer.move_left(1),
-            Input::ArrowRight => buffer.move_right(1),
+            Input::ArrowRight => {
+                if let Summary::Partial(partial) = &summary {
+                    if buffer.is_at_end() {
+                        buffer = partial.clone().into();
+                        buffer.move_to_end();
+                    } else {
+                        buffer.move_right(1);
+                    }
+                } else {
+                    buffer.move_right(1);
+                }
+            }
             Input::Ctrl('c') => buffer.clear(),
             Input::Ctrl('d') => break,
             // return is ctrl-m???
@@ -234,7 +245,7 @@ async fn main() -> io::Result<()> {
                 }
             }
             // tab is ctrl+i???
-            Input::ArrowRight | Input::Ctrl('i') => {
+            Input::Ctrl('i') => {
                 if let Summary::Partial(partial) = &summary {
                     buffer = partial.clone().into();
                     buffer.move_to_end();
