@@ -1,5 +1,6 @@
 use core::cmp::Ordering;
 
+#[derive(Debug)]
 pub struct History {
     history: Vec<String>,
     position: isize,

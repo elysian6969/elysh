@@ -93,7 +93,7 @@ async fn main() -> io::Result<()> {
                 let rest = args.as_str();
 
                 format!("\r\x1b[K{prompt} \x1b[38;5;1m{program}\x1b[m {rest}")
-            },
+            }
             Summary::Partial(partial) => {
                 let rem = unsafe { partial.strip_prefix(buffer.as_str()).unwrap_unchecked() };
                 let len = rem.len();
@@ -118,6 +118,8 @@ async fn main() -> io::Result<()> {
                 if let Some(item) = history.get() {
                     if last_buffer.is_none() {
                         last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
+                    } else {
+                        buffer = Buffer::from(item.clone());
                     }
                 } else {
                     buffer = last_buffer.take().unwrap_or_default();
@@ -129,6 +131,8 @@ async fn main() -> io::Result<()> {
                 if let Some(item) = history.get() {
                     if last_buffer.is_none() {
                         last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
+                    } else {
+                        buffer = Buffer::from(item.clone());
                     }
                 } else {
                     buffer = last_buffer.take().unwrap_or_default();
@@ -137,7 +141,9 @@ async fn main() -> io::Result<()> {
             Input::Ctrl('c') => buffer.clear(),
             Input::Ctrl('d') => break,
             Input::Return => {
-                program = Some(mem::take(&mut buffer));
+                if !buffer.is_empty() {
+                    program = Some(mem::take(&mut buffer));
+                }
             }
             Input::ArrowRight | Input::Tab => {
                 if let Summary::Partial(partial) = &summary {
@@ -198,6 +204,9 @@ async fn main() -> io::Result<()> {
                 }
             }
         }
+
+        let dbg = format!("\x1b[s\x1b[1;1H\x1b[2K{history:?}\x1b[u");
+        session.write_all(dbg.as_bytes()).await?;
     }
 
     session.write_all(b"\n").await?;
