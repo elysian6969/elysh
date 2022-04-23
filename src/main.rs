@@ -104,7 +104,14 @@ async fn main() -> io::Result<()> {
                     if program == executable {
                         Summary::Exact
                     } else {
-                        Summary::Partial(executable)
+                        let rest = args.as_str();
+                        let rest = buffer.as_str().strip_suffix(rest).unwrap_or("");
+
+                        if rest.is_empty() {
+                            Summary::NoMatch
+                        } else {
+                            Summary::Partial(executable)
+                        }
                     }
                 }
                 None => Summary::NoMatch,
@@ -140,16 +147,22 @@ async fn main() -> io::Result<()> {
                 Summary::Partial(partial) => {
                     let remainder = unsafe { partial.strip_prefix(program).unwrap_unchecked() };
                     let length = remainder.len();
+                    let rest = buffer.as_str().strip_prefix(program).unwrap_or("");
 
-                    Line::new()
-                        .clear_line()
-                        .push(prompt)
-                        .push(' ')
-                        .push(program)
-                        .grey()
-                        .push(remainder)
-                        .reset()
-                        .move_left(length as u16)
+                    let mut line = Line::new().clear_line().push(prompt).push(' ');
+
+                    if rest.is_empty() {
+                        line = line
+                            .push(program)
+                            .grey()
+                            .push(remainder)
+                            .reset()
+                            .move_left(length as u16);
+                    } else {
+                        line = line.push(&buffer);
+                    }
+
+                    line
                 }
                 Summary::NoMatch => Line::new()
                     .clear_line()

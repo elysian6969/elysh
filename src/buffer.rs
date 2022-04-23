@@ -50,14 +50,17 @@ impl Buffer {
         }
 
         if self.column == 0 {
-            return
+            return;
         }
 
         if self.column == self.len() {
             self.buffer.pop();
         } else {
-            self.buffer
-                .remove(self.column.saturating_sub(1).min(self.len().saturating_sub(1)));
+            self.buffer.remove(
+                self.column
+                    .saturating_sub(1)
+                    .min(self.len().saturating_sub(1)),
+            );
         }
 
         self.move_left(1);
