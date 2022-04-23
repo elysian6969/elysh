@@ -2,16 +2,18 @@ use std::slice::SliceIndex;
 use std::str::SplitWhitespace;
 use std::{fmt, ops};
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Buffer {
     buffer: String,
+    column: usize,
 }
 
 impl Buffer {
     pub const fn new() -> Self {
         let buffer = String::new();
+        let column = 0;
 
-        Self { buffer }
+        Self { buffer, column }
     }
 
     pub fn as_str(&self) -> &str {
@@ -38,11 +40,27 @@ impl Buffer {
     }
 
     pub fn push(&mut self, character: char) {
-        self.buffer.push(character);
+        self.buffer.insert(self.column, character);
+        self.move_right(1);
     }
 
     pub fn pop(&mut self) {
-        self.buffer.pop();
+        if self.is_empty() {
+            return;
+        }
+
+        if self.column == 0 {
+            return
+        }
+
+        if self.column == self.len() {
+            self.buffer.pop();
+        } else {
+            self.buffer
+                .remove(self.column.saturating_sub(1).min(self.len().saturating_sub(1)));
+        }
+
+        self.move_left(1);
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
@@ -51,6 +69,7 @@ impl Buffer {
 
     pub fn clear(&mut self) {
         self.buffer.clear();
+        self.move_to_start();
     }
 
     pub fn split_program<'a>(&'a self) -> Option<(&'a str, SplitWhitespace<'a>)> {
@@ -59,11 +78,25 @@ impl Buffer {
 
         Some((program, args))
     }
-}
 
-impl fmt::Debug for Buffer {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.buffer, fmt)
+    pub fn move_to_start(&mut self) {
+        self.column = 0;
+    }
+
+    pub fn move_to_end(&mut self) {
+        self.column = self.len();
+    }
+
+    pub fn move_left(&mut self, amount: usize) {
+        self.column = self.column.saturating_sub(amount);
+    }
+
+    pub fn move_right(&mut self, amount: usize) {
+        self.column = self.column.saturating_add(amount).min(self.len());
+    }
+
+    pub fn column_shift(&self) -> usize {
+        self.len().saturating_sub(self.column)
     }
 }
 
@@ -89,7 +122,7 @@ impl Default for Buffer {
 
 impl From<String> for Buffer {
     fn from(buffer: String) -> Self {
-        Self { buffer }
+        Self { buffer, column: 0 }
     }
 }
 

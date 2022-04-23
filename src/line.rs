@@ -40,8 +40,12 @@ impl Line {
     }
 
     pub fn move_left(mut self, amount: u16) -> Self {
-        self.line.push_str(&format!("\x1b[{amount}D"));
-        self
+        if amount == 0 {
+            self
+        } else {
+            self.line.push_str(&format!("\x1b[{amount}D"));
+            self
+        }
     }
 
     pub fn as_str(&self) -> &str {

@@ -173,6 +173,10 @@ async fn main() -> io::Result<()> {
             Summary::NoMatch
         };
 
+        let column_shift = buffer.column_shift();
+        let write = Line::new().move_left(column_shift as u16);
+        session.write_str_all(write.as_str()).await?;
+
         let input = session.wait_for_user().await?;
         let input = match input::map(&input) {
             Some(input) => input,
@@ -206,6 +210,8 @@ async fn main() -> io::Result<()> {
                     buffer = last_buffer.take().unwrap_or_default();
                 }
             }
+            Input::ArrowLeft => buffer.move_left(1),
+            Input::ArrowRight => buffer.move_right(1),
             Input::Ctrl('c') => buffer.clear(),
             Input::Ctrl('d') => break,
             // return is ctrl-m???
@@ -276,6 +282,9 @@ async fn main() -> io::Result<()> {
                 }
             }
         }
+
+        let debug = format!("\x1b[s\x1b[1;1H\x1b[K{:?}\x1b[u", buffer);
+        session.write_all(debug.as_bytes()).await?;
     }
 
     session.write_all(b"\n").await?;
