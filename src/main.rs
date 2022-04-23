@@ -280,7 +280,23 @@ async fn main() -> io::Result<()> {
                             Ok(_status) => Ok(()),
                             Err(error) => Err(error),
                         },
-                        Err(error) => Err(error),
+                        Err(error) => {
+                            if tokio::fs::metadata(program).await.is_ok() {
+                                let _ = std::env::set_current_dir(program);
+
+                                session.set_raw()?;
+                                session.set_nonblocking()?;
+
+                                session.write_all(b"\x1b[2A").await?;
+                                let status = before_prompt().await;
+                                session.write_str_all(&status).await?;
+
+                                //Ok(())
+                                continue;
+                            } else {
+                                Err(error)
+                            }
+                        }
                     };
 
                     if let Err(_result) = result {
