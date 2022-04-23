@@ -224,6 +224,7 @@ async fn main() -> io::Result<()> {
             Input::ArrowRight | Input::Ctrl('i') => {
                 if let Summary::Partial(partial) = &summary {
                     buffer = partial.clone().into();
+                    buffer.move_to_end();
                 }
             }
             Input::Backspace => {
