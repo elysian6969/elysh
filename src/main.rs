@@ -3,6 +3,7 @@
 use buffer::Buffer;
 use history::History;
 use input::Input;
+use line::Line;
 use paths::Executables;
 use session::Session;
 use std::{env, io, mem};
@@ -12,6 +13,7 @@ use tokio::process::Command;
 mod buffer;
 mod history;
 mod input;
+mod line;
 mod paths;
 mod session;
 
@@ -94,11 +96,8 @@ async fn main() -> io::Result<()> {
     }
 
     loop {
-        let buffer2 = buffer.as_str();
-        let mut args = buffer2.split_whitespace();
-
-        let summary = if let Some(program) = args.next() {
-            let executable = executables.search_one(&program);
+        let summary = if let Some((program, args)) = buffer.split_program() {
+            let executable = executables.search_one(program);
             let summary = match executable {
                 Some(executable) => {
                     if program == executable {
@@ -110,29 +109,55 @@ async fn main() -> io::Result<()> {
                 None => Summary::NoMatch,
             };
 
+            let write = match &summary {
+                Summary::Exact => {
+                    let rest = args.as_str();
+
+                    Line::new()
+                        .clear_line()
+                        .push(prompt)
+                        .push(' ')
+                        .red()
+                        .push(program)
+                        .reset()
+                        .push(' ')
+                        .push(rest)
+                }
+                Summary::Partial(partial) => {
+                    let remainder = unsafe { partial.strip_prefix(program).unwrap_unchecked() };
+                    let length = remainder.len();
+
+                    Line::new()
+                        .clear_line()
+                        .push(prompt)
+                        .push(' ')
+                        .push(program)
+                        .grey()
+                        .push(remainder)
+                        .reset()
+                        .move_left(length as u16)
+                }
+                Summary::NoMatch => Line::new()
+                    .clear_line()
+                    .push(prompt)
+                    .push(' ')
+                    .push(&buffer),
+            };
+
+            session.write_str_all(write.as_str()).await?;
+
             summary
         } else {
+            let write = Line::new()
+                .clear_line()
+                .push(prompt)
+                .push(' ')
+                .push(&buffer);
+
+            session.write_str_all(write.as_str()).await?;
+
             Summary::NoMatch
         };
-
-        let mut args = buffer2.split_whitespace();
-        let write = match &summary {
-            Summary::Exact => {
-                let program = unsafe { args.next().unwrap_unchecked() };
-                let rest = args.as_str();
-
-                format!("\r\x1b[K{prompt} \x1b[38;5;1m{program}\x1b[m {rest}")
-            }
-            Summary::Partial(partial) => {
-                let rem = unsafe { partial.strip_prefix(buffer.as_str()).unwrap_unchecked() };
-                let len = rem.len();
-
-                format!("\r\x1b[K{prompt} {buffer}\x1b[38;5;8m{rem}\x1b[m\x1b[{len}D")
-            }
-            Summary::NoMatch => format!("\r\x1b[K{prompt} {buffer}"),
-        };
-
-        session.write_str_all(&write).await?;
 
         let input = session.wait_for_user().await?;
         let input = match input::map(&input) {
@@ -188,7 +213,7 @@ async fn main() -> io::Result<()> {
                 buffer.pop();
             }
             Input::Space => {
-                if !buffer.is_empty() && !buffer.ends_with_space() {
+                if !(buffer.is_empty() || buffer.ends_with_space()) {
                     buffer.push(' ');
                 }
             }
@@ -202,10 +227,11 @@ async fn main() -> io::Result<()> {
             history.reset();
             history.push(program_clone.into());
 
-            let args = program.as_str();
-            let mut args = args.split_whitespace();
+            let test = program.split_program();
+            let dbg = format!("\x1b[s\x1b[3;1H\x1b[2K{test:?}\x1b[u");
+            session.write_all(dbg.as_bytes()).await?;
 
-            if let Some(program) = args.next() {
+            if let Some((program, mut args)) = program.split_program() {
                 if program == "cd" {
                     if let Some(dir) = args.next() {
                         let _ = std::env::set_current_dir(dir);

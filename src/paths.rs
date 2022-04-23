@@ -1,10 +1,10 @@
 use fst::automaton::Str;
 use fst::{Automaton, IntoStreamer, Set};
 use std::collections::BTreeMap;
-use std::env;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
+use std::{env, iter};
 use tokio::{fs, io};
 
 /// A map of executables.
@@ -16,7 +16,8 @@ impl Executables {
     /// Construct a new map of executables.
     pub fn new(set: &BTreeMap<String, PathBuf>) -> Self {
         unsafe {
-            let set = Set::from_iter(set.keys()).unwrap_unchecked();
+            let iter = set.keys();
+            let set = Set::from_iter(iter).unwrap_unchecked();
 
             Self { set }
         }
@@ -81,6 +82,8 @@ pub async fn from_env() -> io::Result<BTreeMap<String, PathBuf>> {
     let user = unsafe { cream::env::current_user().unwrap_unchecked() };
     let group = unsafe { cream::env::current_group().unwrap_unchecked() };
     let mut executables = BTreeMap::new();
+
+    executables.insert("cd".into(), "<builtin>".into());
 
     for path in paths {
         let _ = iterate_dir(&mut executables, user, group, path).await;

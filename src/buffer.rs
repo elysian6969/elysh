@@ -1,4 +1,5 @@
 use std::slice::SliceIndex;
+use std::str::SplitWhitespace;
 use std::{fmt, ops};
 
 #[derive(Clone, Eq, PartialEq)]
@@ -50,6 +51,13 @@ impl Buffer {
 
     pub fn clear(&mut self) {
         self.buffer.clear();
+    }
+
+    pub fn split_program<'a>(&'a self) -> Option<(&'a str, SplitWhitespace<'a>)> {
+        let mut args = self.buffer.split_whitespace();
+        let program = args.next()?;
+
+        Some((program, args))
     }
 }
 
