@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+#![feature(const_deref)]
+#![feature(const_mut_refs)]
+#![feature(const_trait_impl)]
 #![feature(str_split_whitespace_as_str)]
 
 use buffer::Buffer;
@@ -71,6 +74,9 @@ async fn main() -> io::Result<()> {
     let executables = paths::from_env().await?;
     let executables = Executables::new(&executables);
     let mut program = None;
+
+    // enable bracketed paste mode
+    session.write_all(b"\x1b[?2004h").await?;
 
     let status = before_prompt().await;
     session.write_str_all(&status).await?;
@@ -191,13 +197,26 @@ async fn main() -> io::Result<()> {
         session.write_str_all(write.as_str()).await?;
 
         let input = session.wait_for_user().await?;
+
+        // debug start
+        let debug = format!("\x1b[s\x1b[2;1H\x1b[K{:?}\x1b[u", unsafe {
+            std::str::from_utf8_unchecked(&input)
+        });
+        session.write_str_all(&debug).await?;
+        // debug end
+
         let input = match input::map(&input) {
             Some(input) => input,
             None => continue,
         };
 
+        // debug start
+        let debug = format!("\x1b[s\x1b[3;1H\x1b[K{:?}\x1b[u", input);
+        session.write_str_all(&debug).await?;
+        // debug end
+
         match input {
-            Input::ArrowUp => {
+            Input::ArrowUp if input.none() => {
                 history.next();
 
                 if let Some(item) = history.get() {
@@ -210,7 +229,21 @@ async fn main() -> io::Result<()> {
                     buffer = last_buffer.take().unwrap_or_default();
                 }
             }
-            Input::ArrowDown => {
+            // ctrl+p
+            Input::Key('p') if input.ctrl() => {
+                history.next();
+
+                if let Some(item) = history.get() {
+                    if last_buffer.is_none() {
+                        last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
+                    } else {
+                        buffer = Buffer::from(item.clone());
+                    }
+                } else {
+                    buffer = last_buffer.take().unwrap_or_default();
+                }
+            }
+            Input::ArrowDown if input.none() => {
                 history.next_back();
 
                 if let Some(item) = history.get() {
@@ -223,8 +256,22 @@ async fn main() -> io::Result<()> {
                     buffer = last_buffer.take().unwrap_or_default();
                 }
             }
-            Input::ArrowLeft => buffer.move_left(1),
-            Input::ArrowRight => {
+            // ctrl+n
+            Input::Key('n') if input.ctrl() => {
+                history.next_back();
+
+                if let Some(item) = history.get() {
+                    if last_buffer.is_none() {
+                        last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
+                    } else {
+                        buffer = Buffer::from(item.clone());
+                    }
+                } else {
+                    buffer = last_buffer.take().unwrap_or_default();
+                }
+            }
+            Input::ArrowLeft if input.none() => buffer.move_left(1),
+            Input::ArrowRight if input.none() => {
                 if let Summary::Partial(partial) = &summary {
                     if buffer.is_at_end() {
                         buffer = partial.clone().into();
@@ -236,30 +283,66 @@ async fn main() -> io::Result<()> {
                     buffer.move_right(1);
                 }
             }
-            Input::Ctrl('c') => buffer.clear(),
-            Input::Ctrl('d') => break,
-            // return is ctrl-m???
-            Input::Ctrl('m') => {
+
+            // ctrl+c
+            Input::Key('c') if input.ctrl() => buffer.clear(),
+
+            // ctrl+d
+            Input::Key('d') if input.ctrl() => break,
+
+            // ctrl+m aka return
+            Input::Key('m') if input.ctrl() => {
                 if !buffer.is_empty() {
                     program = Some(mem::take(&mut buffer));
                 }
             }
-            // tab is ctrl+i???
-            Input::Ctrl('i') => {
+
+            // ctrl+i aka tab
+            Input::Key('i') if input.ctrl() => {
                 if let Summary::Partial(partial) = &summary {
                     buffer = partial.clone().into();
                     buffer.move_to_end();
                 }
             }
-            Input::Backspace => {
-                buffer.pop();
-            }
-            Input::Space => {
+
+            // ctrl+w
+            Input::Key('w') if input.ctrl() => buffer.remove_word_at_cursor(),
+
+            // ctrl+k
+            Input::Key('k') if input.ctrl() => buffer.remove_right_of_cursor(),
+
+            // shift+arrow left
+            Input::ArrowLeft if input.shift() => buffer.move_to_whitespace_left(),
+
+            // alt+b
+            Input::Key('b') if input.meta() => buffer.move_to_whitespace_left(),
+
+            // shift+arrow right
+            Input::ArrowRight if input.shift() => buffer.move_to_whitespace_right(),
+
+            // alt+f
+            Input::Key('f') if input.meta() => buffer.move_to_whitespace_right(),
+
+            Input::Backspace if input.none() => buffer.remove_at_cursor(),
+            Input::Space if input.none() => {
                 if !(buffer.is_empty() || buffer.ends_with_space()) {
-                    buffer.push(' ');
+                    buffer.insert_at_cursor(' ');
                 }
             }
-            Input::Key(key) => buffer.push(key),
+
+            // unfortunately it's `(pat | pat) if expr`, not `pat | (pat if expr)`
+            Input::Home if input.none() => buffer.move_to_start(),
+
+            // ctrl+a
+            Input::Key('a') if input.ctrl() => buffer.move_to_start(),
+
+            Input::End if input.none() => buffer.move_to_end(),
+
+            // ctrl+e
+            Input::Key('e') if input.ctrl() => buffer.move_to_end(),
+
+            Input::Key(key) if input.none() => buffer.insert_at_cursor(key),
+            Input::Paste(string) if input.none() => buffer.insert_str_at_cursor(&string),
             _ => {}
         }
 
@@ -335,10 +418,14 @@ async fn main() -> io::Result<()> {
             }
         }
 
+        // debug start
         let debug = format!("\x1b[s\x1b[1;1H\x1b[K{:?}\x1b[u", buffer);
-        session.write_all(debug.as_bytes()).await?;
+        session.write_str_all(&debug).await?;
+        // debug end
     }
 
+    // disable bracketed paste mode
+    session.write_all(b"\x1b[?2004l").await?;
     session.write_all(b"\n").await?;
 
     Ok(())

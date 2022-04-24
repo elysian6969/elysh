@@ -39,12 +39,17 @@ impl Buffer {
         self.ends_with(' ')
     }
 
-    pub fn push(&mut self, character: char) {
+    pub fn insert_at_cursor(&mut self, character: char) {
         self.buffer.insert(self.column, character);
         self.move_right(1);
     }
 
-    pub fn pop(&mut self) {
+    pub fn insert_str_at_cursor(&mut self, string: &str) {
+        self.buffer.insert_str(self.column, string);
+        self.move_right(string.len());
+    }
+
+    pub fn remove_at_cursor(&mut self) {
         if self.is_empty() {
             return;
         }
@@ -104,6 +109,38 @@ impl Buffer {
 
     pub fn move_right(&mut self, amount: usize) {
         self.column = self.column.saturating_add(amount).min(self.len());
+    }
+
+    pub fn split_at_cursor(&mut self) -> (&str, &str) {
+        let left = &self.buffer[..self.column.saturating_sub(1)];
+        let right = &self.buffer[self.column..];
+
+        (left, right)
+    }
+
+    pub fn move_to_whitespace_left(&mut self) {
+        if let Some(index) = self.split_at_cursor().0.rfind(' ') {
+            self.column = index + 1;
+        } else {
+            self.column = 0;
+        }
+    }
+
+    pub fn move_to_whitespace_right(&mut self) {
+        if let Some(index) = self.split_at_cursor().1.find(' ') {
+            self.column += index + 1;
+        } else {
+            self.column = self.len();
+        }
+    }
+
+    pub fn remove_word_at_cursor(&mut self) {
+        self.move_to_whitespace_left();
+        self.buffer.truncate(self.column);
+    }
+
+    pub fn remove_right_of_cursor(&mut self) {
+        self.buffer.truncate(self.column);
     }
 
     pub fn column_shift(&self) -> usize {
