@@ -17,6 +17,7 @@ use tokio::process::Command;
 mod buffer;
 mod history;
 mod input;
+mod lexer;
 mod line;
 mod paths;
 mod session;

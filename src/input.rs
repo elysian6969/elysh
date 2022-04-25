@@ -201,7 +201,7 @@ impl fmt::Debug for Input {
         // field-less and without modifiers
         if !has_fields && !has_mod {
             fmt.write_str(self.as_tag_str())?;
-            
+
             return Ok(());
         }
 
