@@ -82,6 +82,7 @@ pub async fn from_env() -> io::Result<BTreeMap<String, PathBuf>> {
         let mut bins = BTreeMap::new();
 
         bins.insert("cd".into(), "<builtin>".into());
+        bins.insert("showkeys".into(), "<builtin>".into());
 
         for bin in set {
             let metadata = match fs::metadata(&bin).await {

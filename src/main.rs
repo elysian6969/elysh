@@ -70,6 +70,7 @@ async fn main() -> io::Result<()> {
 
     let mut history = History::new();
     let mut last_buffer = None;
+    let mut showkeys = false;
 
     let executables = paths::from_env().await?;
     let executables = Executables::new(&executables);
@@ -198,22 +199,18 @@ async fn main() -> io::Result<()> {
 
         let input = session.wait_for_user().await?;
 
-        // debug start
-        let debug = format!("\x1b[s\x1b[2;1H\x1b[K{:?}\x1b[u", unsafe {
-            std::str::from_utf8_unchecked(&input)
-        });
-        session.write_str_all(&debug).await?;
-        // debug end
+        if showkeys {
+            let debug = format!("\x1b[s\x1b[1;1H\x1b[K[showkeys: {:?}]\x1b[u", unsafe {
+                std::str::from_utf8_unchecked(&input)
+            });
+
+            session.write_str_all(&debug).await?;
+        }
 
         let input = match input::map(&input) {
             Some(input) => input,
             None => continue,
         };
-
-        // debug start
-        let debug = format!("\x1b[s\x1b[3;1H\x1b[K{:?}\x1b[u", input);
-        session.write_str_all(&debug).await?;
-        // debug end
 
         match input {
             Input::ArrowUp if input.none() => {
@@ -356,75 +353,76 @@ async fn main() -> io::Result<()> {
             history.push(program_clone.into());
 
             if let Some((program, mut args)) = program.split_program() {
-                if program == "cd" {
-                    if let Some(dir) = args.next() {
-                        let dir = match env::var("HOME").ok() {
-                            Some(home) => dir.replace("~", &home),
-                            None => dir.to_string(),
-                        };
-
-                        if tokio::fs::metadata(&dir).await.is_ok() {
-                            let _ = std::env::set_current_dir(dir);
-                        }
-                    } else if let Some(home) = env::var_os("HOME") {
-                        let _ = std::env::set_current_dir(home);
-                    }
-
-                    session.write_all(b"\x1b[A").await?;
-                    let status = before_prompt().await;
-                    session.write_str_all(&status).await?;
-                } else {
-                    session.write_all(b"\n\r").await?;
-                    session.set_cooked()?;
-                    session.set_blocking()?;
-
-                    let result = Command::new(program).args(args).spawn();
-                    let result = match result {
-                        Ok(mut child) => match child.wait().await {
-                            Ok(_status) => Ok(()),
-                            Err(error) => Err(error),
-                        },
-                        Err(error) => {
+                match program {
+                    "cd" => {
+                        if let Some(dir) = args.next() {
                             let dir = match env::var("HOME").ok() {
-                                Some(home) => program.replace("~", &home),
-                                None => program.to_string(),
+                                Some(home) => dir.replace("~", &home),
+                                None => dir.to_string(),
                             };
 
                             if tokio::fs::metadata(&dir).await.is_ok() {
                                 let _ = std::env::set_current_dir(dir);
-
-                                session.set_raw()?;
-                                session.set_nonblocking()?;
-
-                                session.write_all(b"\x1b[2A").await?;
-                                let status = before_prompt().await;
-                                session.write_str_all(&status).await?;
-
-                                continue;
-                            } else {
-                                Err(error)
                             }
+                        } else if let Some(home) = env::var_os("HOME") {
+                            let _ = std::env::set_current_dir(home);
                         }
-                    };
 
-                    if let Err(_result) = result {
-                        session.write_all(b"\rchild process died\n\r").await?;
+                        session.write_all(b"\x1b[A").await?;
+                        let status = before_prompt().await;
+                        session.write_str_all(&status).await?;
                     }
+                    "showkeys" => {
+                        showkeys = !showkeys;
+                    }
+                    _ => {
+                        session.write_all(b"\n\r").await?;
+                        session.set_cooked()?;
+                        session.set_blocking()?;
 
-                    session.set_raw()?;
-                    session.set_nonblocking()?;
+                        let result = Command::new(program).args(args).spawn();
+                        let result = match result {
+                            Ok(mut child) => match child.wait().await {
+                                Ok(_status) => Ok(()),
+                                Err(error) => Err(error),
+                            },
+                            Err(error) => {
+                                let dir = match env::var("HOME").ok() {
+                                    Some(home) => program.replace("~", &home),
+                                    None => program.to_string(),
+                                };
 
-                    session.write_all(b"\n").await?;
-                    let status = before_prompt().await;
-                    session.write_str_all(&status).await?;
+                                if tokio::fs::metadata(&dir).await.is_ok() {
+                                    let _ = std::env::set_current_dir(dir);
+
+                                    session.set_raw()?;
+                                    session.set_nonblocking()?;
+
+                                    session.write_all(b"\x1b[2A").await?;
+                                    let status = before_prompt().await;
+                                    session.write_str_all(&status).await?;
+
+                                    continue;
+                                } else {
+                                    Err(error)
+                                }
+                            }
+                        };
+
+                        if let Err(_result) = result {
+                            session.write_all(b"\rchild process died\n\r").await?;
+                        }
+
+                        session.set_raw()?;
+                        session.set_nonblocking()?;
+
+                        session.write_all(b"\n").await?;
+                        let status = before_prompt().await;
+                        session.write_str_all(&status).await?;
+                    }
                 }
             }
         }
-
-        // debug start
-        let debug = format!("\x1b[s\x1b[1;1H\x1b[K{:?}\x1b[u", buffer);
-        session.write_str_all(&debug).await?;
-        // debug end
     }
 
     // disable bracketed paste mode
