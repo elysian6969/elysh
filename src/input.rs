@@ -1,11 +1,40 @@
 //! Input mapping.
 
-use core::hint;
 use core::mem::ManuallyDrop;
+use core::{fmt, hint};
 
 const CTRL: u8 = 0b001;
 const META: u8 = 0b010;
 const SHIFT: u8 = 0b100;
+
+#[derive(Debug)]
+enum Modifier {
+    CTRL,
+    META,
+    SHIFT,
+}
+
+struct Modifiers(bool, bool, bool);
+
+impl fmt::Debug for Modifiers {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let mut list = fmt.debug_list();
+
+        if self.0 {
+            list.entry(&Modifier::CTRL);
+        }
+
+        if self.1 {
+            list.entry(&Modifier::META);
+        }
+
+        if self.2 {
+            list.entry(&Modifier::SHIFT);
+        }
+
+        list.finish()
+    }
+}
 
 #[derive(Clone, Copy)]
 #[repr(u32)]
@@ -21,6 +50,26 @@ enum Tag {
     Key = 8,
     Paste = 9,
     Space = 10,
+}
+
+impl Tag {
+    pub const fn as_str(&self) -> &str {
+        const TAG: [&str; 11] = [
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "ArrowUp",
+            "Backspace",
+            "Delete",
+            "End",
+            "Home",
+            "Key",
+            "Paste",
+            "Space",
+        ];
+
+        TAG[*self as usize]
+    }
 }
 
 const ARROW_DOWN: u8 = Tag::ArrowDown as u8;
@@ -59,7 +108,7 @@ struct InputRepr {
     data: Data,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 #[repr(C)]
 #[non_exhaustive]
 pub enum Input {
@@ -79,6 +128,12 @@ pub enum Input {
 impl Input {
     const fn repr(&self) -> &mut InputRepr {
         unsafe { &mut *(self as *const Self as *mut InputRepr) }
+    }
+
+    const fn as_tag_str(&self) -> &str {
+        let repr = self.repr();
+
+        repr.tag.as_str()
     }
 
     const fn modifiers(&self) -> &mut u8 {
@@ -135,6 +190,26 @@ impl Input {
 
     pub const fn shift(&self) -> bool {
         *self.modifiers() & SHIFT != 0
+    }
+}
+
+impl fmt::Debug for Input {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let mut tuple = fmt.debug_tuple(self.as_tag_str());
+
+        match self {
+            Input::Key(key) => {
+                tuple.field(key);
+            }
+            Input::Paste(string) => {
+                tuple.field(string);
+            }
+            _ => {}
+        }
+
+        tuple
+            .field(&Modifiers(self.ctrl(), self.meta(), self.shift()))
+            .finish()
     }
 }
 
