@@ -284,6 +284,9 @@ async fn main() -> io::Result<()> {
                 }
             }
 
+            // alt+enter
+            Input::Key('\r') if input.meta() => buffer.insert_at_cursor('\n'),
+
             // ctrl+c
             Input::Key('c') if input.ctrl() => buffer.clear(),
 

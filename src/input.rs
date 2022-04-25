@@ -182,7 +182,7 @@ pub fn map(bytes: &[u8]) -> Option<Input> {
             b"\x1b[1;5C" => Input::ArrowRight.with_shift(),
             b"\x1b[1;5D" => Input::ArrowLeft.with_shift(),
             _ => return None,
-        }
+        },
         _ => match bytes.strip_prefix(b"\x1b[200~") {
             Some(bytes) => match bytes.strip_suffix(b"\x1b[201~") {
                 Some(bytes) => Input::Paste(String::from_utf8_lossy(bytes).into()).with_none(),

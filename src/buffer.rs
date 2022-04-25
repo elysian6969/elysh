@@ -6,14 +6,20 @@ use std::{fmt, ops};
 pub struct Buffer {
     buffer: String,
     column: usize,
+    line: usize,
 }
 
 impl Buffer {
     pub const fn new() -> Self {
         let buffer = String::new();
         let column = 0;
+        let line = 0;
 
-        Self { buffer, column }
+        Self {
+            buffer,
+            column,
+            line,
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -50,14 +56,6 @@ impl Buffer {
     }
 
     pub fn remove_at_cursor(&mut self) {
-        if self.is_empty() {
-            return;
-        }
-
-        if self.column == 0 {
-            return;
-        }
-
         if self.is_at_end() {
             self.buffer.pop();
         } else {
@@ -122,7 +120,7 @@ impl Buffer {
         if let Some(index) = self.split_at_cursor().0.rfind(' ') {
             self.column = index + 1;
         } else {
-            self.column = 0;
+            self.move_to_start();
         }
     }
 
@@ -130,7 +128,7 @@ impl Buffer {
         if let Some(index) = self.split_at_cursor().1.find(' ') {
             self.column += index + 1;
         } else {
-            self.column = self.len();
+            self.move_to_end();
         }
     }
 
@@ -170,7 +168,11 @@ impl Default for Buffer {
 
 impl From<String> for Buffer {
     fn from(buffer: String) -> Self {
-        Self { buffer, column: 0 }
+        Self {
+            buffer,
+            column: 0,
+            line: 0,
+        }
     }
 }
 
