@@ -195,8 +195,19 @@ impl Input {
 
 impl fmt::Debug for Input {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let has_fields = matches!(self, Input::Key(_) | Input::Paste(_));
+        let has_mod = !self.none();
+
+        // field-less and without modifiers
+        if !has_fields && !has_mod {
+            fmt.write_str(self.as_tag_str())?;
+            
+            return Ok(());
+        }
+
         let mut tuple = fmt.debug_tuple(self.as_tag_str());
 
+        // field handling
         match self {
             Input::Key(key) => {
                 tuple.field(key);
@@ -207,9 +218,11 @@ impl fmt::Debug for Input {
             _ => {}
         }
 
-        tuple
-            .field(&Modifiers(self.ctrl(), self.meta(), self.shift()))
-            .finish()
+        if has_mod {
+            tuple.field(&Modifiers(self.ctrl(), self.meta(), self.shift()));
+        }
+
+        tuple.finish()
     }
 }
 
