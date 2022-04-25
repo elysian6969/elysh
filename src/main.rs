@@ -198,18 +198,28 @@ async fn main() -> io::Result<()> {
         session.write_str_all(write.as_str()).await?;
 
         let input = session.wait_for_user().await?;
-
-        if showkeys {
-            let debug = format!("\x1b[s\x1b[1;1H\x1b[K[showkeys: {:?}]\x1b[u", unsafe {
-                std::str::from_utf8_unchecked(&input)
-            });
-
-            session.write_str_all(&debug).await?;
-        }
-
+        let input_str = unsafe { std::str::from_utf8_unchecked(&input) };
         let input = match input::map(&input) {
-            Some(input) => input,
-            None => continue,
+            Some(input) => {
+                if showkeys {
+                    let debug = format!(
+                        "\x1b[s\x1b[1;1H\x1b[K[showkeys: {input_str:?} -> {input:?}]\x1b[u"
+                    );
+
+                    session.write_str_all(&debug).await?;
+                }
+
+                input
+            }
+            None => {
+                if showkeys {
+                    let debug = format!("\x1b[s\x1b[1;1H\x1b[K[showkeys: {input_str:?}]\x1b[u");
+
+                    session.write_str_all(&debug).await?;
+                }
+
+                continue;
+            }
         };
 
         match input {
