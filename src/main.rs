@@ -390,6 +390,8 @@ async fn main() -> io::Result<()> {
                     }
                     _ => {
                         session.write_all(b"\n\r").await?;
+                        // disable bracketed paste mode
+                        session.write_all(b"\x1b[?2004l").await?;
                         session.set_cooked()?;
                         session.set_blocking()?;
 
@@ -428,7 +430,8 @@ async fn main() -> io::Result<()> {
 
                         session.set_raw()?;
                         session.set_nonblocking()?;
-
+                        // enable bracketed paste mode
+                        session.write_all(b"\x1b[?2004h").await?;
                         session.write_all(b"\n").await?;
                         let status = before_prompt().await;
                         session.write_str_all(&status).await?;

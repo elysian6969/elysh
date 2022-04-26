@@ -1,7 +1,7 @@
 //! Debug printing of modifiers.
 
-use core::fmt;
 use super::Input;
+use core::fmt;
 
 #[derive(Debug)]
 enum Modifier {
