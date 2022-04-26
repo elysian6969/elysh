@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 #![feature(const_deref)]
 #![feature(const_mut_refs)]
+#![feature(const_ptr_read)]
+#![feature(const_ptr_write)]
 #![feature(const_trait_impl)]
 #![feature(str_split_whitespace_as_str)]
+#![feature(type_name_of_val)]
 
 use buffer::Buffer;
 use history::History;
@@ -10,6 +13,7 @@ use input::Input;
 use line::Line;
 use paths::Executables;
 use session::Session;
+use std::path::PathBuf;
 use std::{env, io, mem};
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
@@ -21,8 +25,6 @@ mod lexer;
 mod line;
 mod paths;
 mod session;
-
-use std::path::PathBuf;
 
 async fn home() -> Option<PathBuf> {
     use tokio::fs;

@@ -1,112 +1,11 @@
 //! Input mapping.
 
-use core::mem::ManuallyDrop;
-use core::{fmt, hint};
+use core::fmt;
+use modifiers::Modifiers;
+use repr::InputRepr;
 
-const CTRL: u8 = 0b001;
-const META: u8 = 0b010;
-const SHIFT: u8 = 0b100;
-
-#[derive(Debug)]
-enum Modifier {
-    CTRL,
-    META,
-    SHIFT,
-}
-
-struct Modifiers(bool, bool, bool);
-
-impl fmt::Debug for Modifiers {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let mut list = fmt.debug_list();
-
-        if self.0 {
-            list.entry(&Modifier::CTRL);
-        }
-
-        if self.1 {
-            list.entry(&Modifier::META);
-        }
-
-        if self.2 {
-            list.entry(&Modifier::SHIFT);
-        }
-
-        list.finish()
-    }
-}
-
-#[derive(Clone, Copy)]
-#[repr(u32)]
-enum Tag {
-    ArrowDown = 0,
-    ArrowLeft = 1,
-    ArrowRight = 2,
-    ArrowUp = 3,
-    Backspace = 4,
-    Delete = 5,
-    End = 6,
-    Home = 7,
-    Key = 8,
-    Paste = 9,
-    Space = 10,
-}
-
-impl Tag {
-    pub const fn as_str(&self) -> &str {
-        const TAG: [&str; 11] = [
-            "ArrowDown",
-            "ArrowLeft",
-            "ArrowRight",
-            "ArrowUp",
-            "Backspace",
-            "Delete",
-            "End",
-            "Home",
-            "Key",
-            "Paste",
-            "Space",
-        ];
-
-        TAG[*self as usize]
-    }
-}
-
-const ARROW_DOWN: u8 = Tag::ArrowDown as u8;
-const HOME: u8 = Tag::Home as u8;
-const KEY: u8 = Tag::Key as u8;
-const PASTE: u8 = Tag::Paste as u8;
-const SPACE: u8 = Tag::Space as u8;
-
-#[repr(C)]
-struct TagOnly {
-    modifiers: u8,
-}
-
-#[repr(C)]
-struct Key {
-    code: char,
-    modifiers: u8,
-}
-
-#[repr(C)]
-struct Paste {
-    string: Box<str>,
-    modifiers: u8,
-}
-
-#[repr(C)]
-union Data {
-    tag_only: ManuallyDrop<TagOnly>,
-    key: ManuallyDrop<Key>,
-    paste: ManuallyDrop<Paste>,
-}
-
-#[repr(C)]
-struct InputRepr {
-    tag: Tag,
-    data: Data,
-}
+mod modifiers;
+mod repr;
 
 #[derive(Clone, Eq, PartialEq)]
 #[repr(C)]
@@ -123,73 +22,75 @@ pub enum Input {
     Key(char),
     Paste(Box<str>),
     Space,
+
+    /// THIS IS SUPER IMPORTANT!!!
+    ///
+    /// Informs the compiler to allocate enough space required to write bytes at the end of every
+    /// variant.
+    #[doc(hidden)]
+    Padding([u8; 24]),
 }
 
 impl Input {
-    const fn repr(&self) -> &mut InputRepr {
-        unsafe { &mut *(self as *const Self as *mut InputRepr) }
+    #[inline]
+    const fn repr(&self) -> &InputRepr {
+        unsafe { &*(self as *const Self as *const InputRepr) }
     }
 
+    #[inline]
+    const fn repr_mut(&mut self) -> &mut InputRepr {
+        unsafe { &mut *(self as *mut Self as *mut InputRepr) }
+    }
+
+    #[inline]
     const fn as_tag_str(&self) -> &str {
-        let repr = self.repr();
-
-        repr.tag.as_str()
-    }
-
-    const fn modifiers(&self) -> &mut u8 {
-        let repr = self.repr();
-        let modifiers = unsafe {
-            match repr.tag as u8 {
-                ARROW_DOWN..=HOME | SPACE => &repr.data.tag_only.modifiers,
-                KEY => &repr.data.key.modifiers,
-                PASTE => &repr.data.paste.modifiers,
-                _ => hint::unreachable_unchecked(),
-            }
-        };
-
-        unsafe { &mut *(modifiers as *const u8 as *mut u8) }
-    }
-
-    const fn set_modifiers(&mut self, modifiers: u8) {
-        *self.modifiers() = modifiers;
+        self.repr().as_tag_str()
     }
 
     /// Constructing an `Input` variant will not initialize the modifiers
     /// You definitely do not want random junk data!
+    #[inline]
     const fn with_none(mut self) -> Self {
-        self.set_modifiers(0);
+        self.repr_mut().set_none();
         self
     }
 
+    #[inline]
     const fn with_ctrl(mut self) -> Self {
-        self.set_modifiers(CTRL);
+        self.repr_mut().set_ctrl();
         self
     }
 
+    #[inline]
     const fn with_meta(mut self) -> Self {
-        self.set_modifiers(META);
+        self.repr_mut().set_meta();
         self
     }
 
+    #[inline]
     const fn with_shift(mut self) -> Self {
-        self.set_modifiers(SHIFT);
+        self.repr_mut().set_shift();
         self
     }
 
+    #[inline]
     pub const fn none(&self) -> bool {
-        *self.modifiers() == 0
+        self.repr().is_none()
     }
 
+    #[inline]
     pub const fn ctrl(&self) -> bool {
-        *self.modifiers() & CTRL != 0
+        self.repr().has_ctrl()
     }
 
+    #[inline]
     pub const fn meta(&self) -> bool {
-        *self.modifiers() & META != 0
+        self.repr().has_meta()
     }
 
+    #[inline]
     pub const fn shift(&self) -> bool {
-        *self.modifiers() & SHIFT != 0
+        self.repr().has_shift()
     }
 }
 
@@ -219,7 +120,7 @@ impl fmt::Debug for Input {
         }
 
         if has_mod {
-            tuple.field(&Modifiers(self.ctrl(), self.meta(), self.shift()));
+            tuple.field(&Modifiers::from(self));
         }
 
         tuple.finish()
@@ -273,7 +174,7 @@ pub fn map(bytes: &[u8]) -> Option<Input> {
         },
         _ => match bytes.strip_prefix(b"\x1b[200~") {
             Some(bytes) => match bytes.strip_suffix(b"\x1b[201~") {
-                Some(bytes) => Input::Paste(String::from_utf8_lossy(bytes).into()).with_none(),
+                Some(bytes) => Input::Paste(Box::from(String::from_utf8_lossy(bytes))).with_none(),
                 None => return None,
             },
             None => return None,
