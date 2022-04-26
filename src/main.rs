@@ -71,7 +71,7 @@ async fn main() -> io::Result<()> {
     session.set_raw()?;
     session.set_nonblocking()?;
 
-    let mut history = History::new();
+    let mut history = History::load().await.unwrap_or_default();
     let mut last_buffer = None;
     let mut showkeys = false;
 
@@ -440,6 +440,8 @@ async fn main() -> io::Result<()> {
             }
         }
     }
+
+    let _ = history.save().await;
 
     // disable bracketed paste mode
     session.write_all(b"\x1b[?2004l").await?;
