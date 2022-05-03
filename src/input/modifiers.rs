@@ -13,6 +13,7 @@ enum Modifier {
 pub struct Modifiers(bool, bool, bool);
 
 impl Modifiers {
+    #[inline]
     pub const fn from(input: &Input) -> Self {
         let ctrl = input.ctrl();
         let meta = input.meta();
@@ -23,6 +24,7 @@ impl Modifiers {
 }
 
 impl fmt::Debug for Modifiers {
+    #[inline]
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let mut list = fmt.debug_list();
 

@@ -14,6 +14,7 @@ pub struct Session {
 }
 
 impl Session {
+    #[inline]
     pub fn new(tty: File) -> io::Result<Self> {
         let fd = tty.as_raw_fd();
         let poller = AsyncFd::new(fd)?;
@@ -45,18 +46,21 @@ impl Session {
         })
     }
 
+    #[inline]
     pub fn set_cooked(&self) -> io::Result<()> {
         termios::tcsetattr(self.as_raw_fd(), termios::TCSANOW, &self.cooked)?;
 
         Ok(())
     }
 
+    #[inline]
     pub fn set_raw(&self) -> io::Result<()> {
         termios::tcsetattr(self.as_raw_fd(), termios::TCSANOW, &self.raw)?;
 
         Ok(())
     }
 
+    #[inline]
     pub fn set_nonblocking(&self) -> io::Result<()> {
         unsafe {
             let flags = libc::fcntl(self.as_raw_fd(), libc::F_GETFL);
@@ -67,6 +71,7 @@ impl Session {
         Ok(())
     }
 
+    #[inline]
     pub fn set_blocking(&self) -> io::Result<()> {
         unsafe {
             let flags = libc::fcntl(self.as_raw_fd(), libc::F_GETFL);
@@ -77,10 +82,12 @@ impl Session {
         Ok(())
     }
 
+    #[inline]
     pub fn tty(&self) -> &mut File {
         unsafe { &mut *self.tty.get() }
     }
 
+    #[inline]
     pub async fn wait_for_user(&self) -> io::Result<Vec<u8>> {
         let mut sink = Vec::new();
 
@@ -111,6 +118,7 @@ impl Session {
         Ok(sink)
     }
 
+    #[inline]
     pub async fn write_all(&self, buffer: &[u8]) -> io::Result<()> {
         loop {
             let result = self.tty().write_all(buffer).await;
@@ -125,6 +133,7 @@ impl Session {
         Ok(())
     }
 
+    #[inline]
     pub async fn write_str_all(&self, string: &str) -> io::Result<()> {
         self.write_all(string.as_bytes()).await?;
 
@@ -133,6 +142,7 @@ impl Session {
 }
 
 impl AsRawFd for Session {
+    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         unsafe { (&mut *self.tty.get()).as_raw_fd() }
     }
@@ -140,6 +150,7 @@ impl AsRawFd for Session {
 
 // in case of something fatal, attempt to restore normalcy
 impl Drop for Session {
+    #[inline]
     fn drop(&mut self) {
         let _ = self.set_blocking();
         let _ = self.set_cooked();

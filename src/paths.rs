@@ -1,19 +1,21 @@
+use elysh_theme::Style;
 use fst::automaton::Str;
 use fst::{Automaton, IntoStreamer, Set};
 use std::collections::{BTreeMap, HashSet};
-use std::env;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
+use std::{env, fmt, hint};
 use tokio::{fs, io};
 
 /// A map of executables.
-pub struct Executables {
+pub struct Exes {
     set: Set<Vec<u8>>,
 }
 
-impl Executables {
+impl Exes {
     /// Construct a new map of executables.
+    #[inline]
     pub fn new(set: &BTreeMap<String, PathBuf>) -> Self {
         unsafe {
             let iter = set.keys();
@@ -23,21 +25,128 @@ impl Executables {
         }
     }
 
+    /// Construct a new map of executables from env.
+    #[inline]
+    pub async fn from_env() -> io::Result<Self> {
+        let exes = from_env().await?;
+
+        Ok(Self::new(&exes))
+    }
+
     /// Search for executables by the provided query.
-    pub fn search(&self, query: &str) -> Vec<String> {
+    #[inline]
+    fn fst_search(&self, query: &str) -> Vec<String> {
         let query = Str::new(query).starts_with();
         let stream = self.set.search(query).into_stream();
 
         stream.into_strs().unwrap_or_default()
     }
 
+    /// Search for executables by the provided query.
+    #[inline]
+    pub fn search(&self, query: &str) -> Vec<Summary> {
+        let results = self.fst_search(query);
+
+        results
+            .into_iter()
+            .map(|result| match result.strip_prefix(query) {
+                Some(rest) => {
+                    if rest.is_empty() {
+                        Summary::Exact(Box::from(query))
+                    } else {
+                        Summary::Partial(Box::from(query), Box::from(rest))
+                    }
+                }
+                None => unsafe { hint::unreachable_unchecked() },
+            })
+            .collect()
+    }
+
     /// Search for an executable by the provided query.
-    pub fn search_one(&self, query: &str) -> Option<String> {
-        self.search(query).into_iter().next()
+    #[inline]
+    pub fn search_one(&self, query: &str) -> Summary {
+        match self.search(query).into_iter().next() {
+            Some(result) => result,
+            None => Summary::NoMatch,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Summary {
+    Exact(Box<str>),
+    Partial(Box<str>, Box<str>),
+    NoMatch,
+}
+
+impl Summary {
+    #[inline]
+    pub const fn is_exact(&self) -> bool {
+        matches!(self, Summary::Exact(_))
+    }
+
+    #[inline]
+    pub const fn is_partial(&self) -> bool {
+        matches!(self, Summary::Partial(_, _))
+    }
+
+    #[inline]
+    pub const fn is_no_match(&self) -> bool {
+        matches!(self, Summary::NoMatch)
+    }
+
+    #[inline]
+    pub const fn shift(&self) -> usize {
+        match self {
+            Summary::Partial(_partial, rest) => rest.len(),
+            _ => 0,
+        }
+    }
+
+    #[inline]
+    pub fn display<'a>(&'a self, exact: &'a Style, rest: &'a Style) -> Option<SummaryDisplay<'a>> {
+        if self.is_no_match() {
+            return None;
+        } else {
+            Some(SummaryDisplay {
+                exact,
+                rest,
+                summary: &self,
+            })
+        }
+    }
+}
+
+pub struct SummaryDisplay<'a> {
+    exact: &'a Style,
+    rest: &'a Style,
+    summary: &'a Summary,
+}
+
+impl<'a> fmt::Display for SummaryDisplay<'a> {
+    #[inline]
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self.summary {
+            Summary::Exact(exact) => {
+                fmt.write_str(self.exact.as_ansi())?;
+                fmt.write_str(exact)?;
+                fmt.write_str("\x1b[m")?;
+            }
+            Summary::Partial(partial, rest) => {
+                fmt.write_str(partial)?;
+                fmt.write_str(self.rest.as_ansi())?;
+                fmt.write_str(rest)?;
+                fmt.write_str("\x1b[m")?;
+            }
+            _ => unsafe { hint::unreachable_unchecked() },
+        }
+
+        Ok(())
     }
 }
 
 /// Checks the provided metadata if it is executable for the provided user and group.
+#[inline]
 pub fn can_execute(user: u32, group: u32, metadata: &Metadata) -> bool {
     let mode = metadata.mode();
     let user = metadata.uid() == user;
@@ -51,6 +160,7 @@ pub fn can_execute(user: u32, group: u32, metadata: &Metadata) -> bool {
 }
 
 /// Iterate a directory.
+#[inline]
 pub async fn iterate_dir(bins: &mut HashSet<PathBuf>, path: PathBuf) -> io::Result<()> {
     let mut entries = fs::read_dir(path).await?;
 
@@ -62,7 +172,8 @@ pub async fn iterate_dir(bins: &mut HashSet<PathBuf>, path: PathBuf) -> io::Resu
 }
 
 /// Collects a map of executables from the `PATH` envrionment variable.
-pub async fn from_env() -> io::Result<BTreeMap<String, PathBuf>> {
+#[inline]
+async fn from_env() -> io::Result<BTreeMap<String, PathBuf>> {
     let path = env::var_os("PATH").unwrap_or_default();
     let paths = env::split_paths(&path);
     let user = unsafe { cream::env::current_user().unwrap_unchecked() };

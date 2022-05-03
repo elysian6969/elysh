@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![feature(char_indices_offset)]
 #![feature(const_deref)]
 #![feature(const_mut_refs)]
 #![feature(const_ptr_read)]
@@ -7,51 +8,224 @@
 #![feature(str_split_whitespace_as_str)]
 #![feature(type_name_of_val)]
 
-use buffer::Buffer;
-use history::History;
+use context::{Context, Prompt};
 use input::Input;
-use line::Line;
-use paths::Executables;
-use session::Session;
+use paths::Summary;
+use std::io;
+use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::{env, io, mem};
 use tokio::fs::OpenOptions;
-use tokio::process::Command;
 
-mod buffer;
+mod context;
 mod history;
 mod input;
-mod lexer;
-mod line;
 mod paths;
 mod session;
 
-async fn home() -> Option<PathBuf> {
-    use tokio::fs;
+const WORD_CHARS: &[char] = &['/', '[', '&', '.', ';', '!', ']', '}', ':', '"', '|', ' '];
 
-    let home = env::var_os("HOME")?;
-    let home = fs::canonicalize(home).await.ok()?;
+use elysh_syntax::Var;
+use elysh_theme::{Color, DisplaySpaced, Style};
+use std::fmt;
+use std::fmt::Write;
 
-    Some(home)
+pub struct DisplayArg<'a> {
+    incomplete: bool,
+    quote: char,
+    string: &'a str,
 }
 
-async fn before_prompt() -> String {
-    let dir = match env::current_dir() {
-        Ok(dir) => dir,
-        Err(_) => return "<unknown>".into(),
-    };
+impl<'a> DisplayArg<'a> {
+    pub fn new(incomplete: bool, quote: char, string: &'a str) -> Self {
+        Self {
+            incomplete,
+            quote,
+            string,
+        }
+    }
+}
 
-    let display = home()
-        .await
-        .and_then(|home| {
-            let stripped = dir.strip_prefix(home).ok()?.display().to_string();
-            let seperator = if stripped.is_empty() { "" } else { "/" };
+impl<'a> fmt::Display for DisplayArg<'a> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_char(self.quote)?;
+        fmt.write_str(&self.string)?;
 
-            Some(format!("~{seperator}{stripped}"))
-        })
-        .unwrap_or_else(|| dir.display().to_string());
+        if !self.incomplete {
+            fmt.write_char(self.quote)?;
+        }
 
-    format!("\r\x1b[K {}\n\r", display)
+        Ok(())
+    }
+}
+
+pub struct DisplayVar<'a> {
+    seperator_style: &'a Style,
+    string_style: &'a Style,
+    env: &'a Var<'a>,
+}
+
+impl<'a> DisplayVar<'a> {
+    pub fn new(seperator_style: &'a Style, string_style: &'a Style, env: &'a Var<'a>) -> Self {
+        Self {
+            seperator_style,
+            string_style,
+            env,
+        }
+    }
+}
+
+impl<'a> fmt::Display for DisplayVar<'a> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self.env {
+            Var::Pair(key, val) => {
+                fmt.write_str(&key)?;
+
+                let mut spaced = DisplaySpaced::new(fmt);
+
+                spaced
+                    .style(&self.seperator_style)
+                    .entry(&'=')
+                    .clear_style()
+                    .finish()?;
+
+                let mut spaced = DisplaySpaced::new(fmt);
+                if let Some(quote) = val.quote() {
+                    spaced
+                        .style(&self.string_style)
+                        .entry(&DisplayArg::new(
+                            val.is_incomplete(),
+                            quote.as_char(),
+                            val.as_str(),
+                        ))
+                        .clear_style();
+                } else {
+                    spaced.entry(&val.as_str());
+                }
+            }
+            Var::IncompletePair(key) => {
+                fmt.write_str(&key)?;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+}
+
+pub struct Display<'a> {
+    prompt: &'a Prompt,
+    command: Result<elysh_syntax::Command<'a>, elysh_syntax::CommandError<'a>>,
+    string: &'a str,
+    shift: usize,
+    summary: &'a Summary,
+}
+
+impl<'a> Display<'a> {
+    pub fn new(context: &'a Context, summary: &'a Summary) -> Self {
+        let prompt = &context.prompt;
+        let command = context.command();
+        let string = &context.edit;
+        let shift = context.edit.shift() + summary.shift();
+
+        Self {
+            prompt,
+            command,
+            string,
+            shift,
+            summary,
+        }
+    }
+}
+
+impl<'a> fmt::Display for Display<'a> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("\r\x1b[K")?;
+
+        fmt::Display::fmt(&self.prompt, fmt)?;
+
+        let seperator_style = Style::new(Color::Blue);
+        let string_style = Style::new(Color::Green);
+        let exact_style = Style::new(Color::Green);
+        let partial_style = Style::new(Color::Black).bright(true);
+
+        match &self.command {
+            Ok(command) => {
+                let mut spaced = DisplaySpaced::new(fmt);
+
+                for env in &command.vars {
+                    spaced.entry(&DisplayVar::new(&seperator_style, &string_style, &env));
+                }
+
+                spaced.finish()?;
+
+                if !command.vars.is_empty() && !command.program.as_str().is_empty() {
+                    fmt.write_char(' ')?;
+                }
+
+                if let Some(display) = self.summary.display(&exact_style, &partial_style) {
+                    fmt::Display::fmt(&display, fmt)?;
+                } else {
+                    let arg = &command.program;
+                    let mut spaced = DisplaySpaced::new(fmt);
+
+                    if let Some(quote) = arg.quote() {
+                        spaced
+                            .style(&string_style)
+                            .entry(&DisplayArg::new(
+                                arg.is_incomplete(),
+                                quote.as_char(),
+                                arg.as_str(),
+                            ))
+                            .clear_style();
+                    } else {
+                        spaced.entry(&arg.as_str());
+                    }
+
+                    spaced.finish()?;
+                }
+
+                if !command.args.is_empty() {
+                    fmt.write_char(' ')?;
+                }
+
+                let mut spaced = DisplaySpaced::new(fmt);
+
+                for arg in &command.args {
+                    if let Some(quote) = arg.quote() {
+                        spaced
+                            .style(&string_style)
+                            .entry(&DisplayArg::new(
+                                arg.is_incomplete(),
+                                quote.as_char(),
+                                arg.as_str(),
+                            ))
+                            .clear_style();
+                    } else {
+                        spaced.entry(&arg.as_str());
+                    }
+                }
+
+                spaced.finish()?;
+            }
+            _ => {}
+        }
+
+        if self.string.ends_with(char::is_whitespace) {
+            fmt.write_char(' ')?;
+        }
+
+        match self.shift {
+            0 => {}
+            1 => fmt.write_str("\x1b[D")?,
+            n => {
+                fmt.write_str("\x1b[")?;
+                fmt::Display::fmt(&n, fmt)?;
+                fmt.write_char('D')?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -62,390 +236,148 @@ async fn main() -> io::Result<()> {
         .open("/dev/tty")
         .await?;
 
-    let session = Session::new(tty)?;
+    let mut context = Context::new(tty).await?;
 
-    let mut buffer = Buffer::new();
-
-    let prompt = "\x1b[38;5;1m >\x1b[m";
-
-    session.set_raw()?;
-    session.set_nonblocking()?;
-
-    let mut history = History::load().await.unwrap_or_default();
-    let mut last_buffer = None;
-    let mut showkeys = false;
-
-    let executables = paths::from_env().await?;
-    let executables = Executables::new(&executables);
-    let mut program = None;
-
-    // enable bracketed paste mode
-    session.write_all(b"\x1b[?2004h").await?;
-
-    let status = before_prompt().await;
-    session.write_str_all(&status).await?;
-
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    pub enum Summary {
-        Exact,
-        Partial(String),
-        NoMatch,
-    }
-
-    impl Summary {
-        pub const fn is_exact(&self) -> bool {
-            matches!(self, Summary::Exact)
-        }
-
-        pub const fn is_partial(&self) -> bool {
-            matches!(self, Summary::Partial(_))
-        }
-
-        pub const fn is_no_match(&self) -> bool {
-            matches!(self, Summary::NoMatch)
-        }
-    }
+    context.enable_raw().await?;
+    context.pre_prompt().await?;
 
     loop {
-        let summary = if let Some((program, args)) = buffer.split_program() {
-            let executable = executables.search_one(program);
-            let summary = match executable {
-                Some(executable) => {
-                    if program == executable {
-                        Summary::Exact
-                    } else {
-                        let rest = args.as_str();
-                        let rest = buffer.as_str().strip_suffix(rest).unwrap_or("");
+        let summary = context.suggest();
+        let display = Display::new(&context, &summary).to_string();
 
-                        if rest.is_empty() {
-                            Summary::NoMatch
-                        } else {
-                            Summary::Partial(executable)
-                        }
-                    }
-                }
-                None => Summary::NoMatch,
-            };
+        context.session.write_all(display.as_bytes()).await?;
 
-            let write = match &summary {
-                Summary::Exact => {
-                    let rest = args.as_str();
-                    let space = if buffer
-                        .as_str()
-                        .strip_suffix(rest)
-                        .unwrap_or("")
-                        .chars()
-                        .next_back()
-                        .map(|character| character.is_whitespace())
-                        .unwrap_or(false)
-                    {
-                        " "
-                    } else {
-                        ""
-                    };
-
-                    Line::new()
-                        .clear_line()
-                        .push(prompt)
-                        .push(' ')
-                        .red()
-                        .push(program)
-                        .reset()
-                        .push(space)
-                        .push(rest)
-                }
-                Summary::Partial(partial) => {
-                    let remainder = unsafe { partial.strip_prefix(program).unwrap_unchecked() };
-                    let length = remainder.len();
-                    let rest = buffer.as_str().strip_prefix(program).unwrap_or("");
-
-                    let mut line = Line::new().clear_line().push(prompt).push(' ');
-
-                    if rest.is_empty() {
-                        line = line
-                            .push(program)
-                            .grey()
-                            .push(remainder)
-                            .reset()
-                            .move_left(length as u16);
-                    } else {
-                        line = line.push(&buffer);
-                    }
-
-                    line
-                }
-                Summary::NoMatch => Line::new()
-                    .clear_line()
-                    .push(prompt)
-                    .push(' ')
-                    .push(&buffer),
-            };
-
-            session.write_str_all(write.as_str()).await?;
-
-            summary
-        } else {
-            let write = Line::new()
-                .clear_line()
-                .push(prompt)
-                .push(' ')
-                .push(&buffer);
-
-            session.write_str_all(write.as_str()).await?;
-
-            Summary::NoMatch
-        };
-
-        let column_shift = buffer.column_shift();
-        let write = Line::new().move_left(column_shift as u16);
-        session.write_str_all(write.as_str()).await?;
-
-        let input = session.wait_for_user().await?;
-        let input_str = unsafe { std::str::from_utf8_unchecked(&input) };
-        let input = match input::map(&input) {
-            Some(input) => {
-                if showkeys {
-                    let debug = format!(
-                        "\x1b[s\x1b[1;1H\x1b[K[showkeys: {input_str:?} -> {input:?}]\x1b[u"
-                    );
-
-                    session.write_str_all(&debug).await?;
-                }
-
-                input
-            }
-            None => {
-                if showkeys {
-                    let debug = format!("\x1b[s\x1b[1;1H\x1b[K[showkeys: {input_str:?}]\x1b[u");
-
-                    session.write_str_all(&debug).await?;
-                }
-
-                continue;
-            }
-        };
+        let input = context.next_input().await?;
 
         match input {
-            Input::ArrowUp if input.none() => {
-                history.next();
-
-                if let Some(item) = history.get() {
-                    if last_buffer.is_none() {
-                        last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
-                    } else {
-                        buffer = Buffer::from(item.clone());
+            Input::ArrowUp if input.none() => context.history_up(),
+            Input::Key('p') if input.ctrl() => context.history_up(),
+            Input::ArrowDown if input.none() => context.history_down(),
+            Input::Key('n') if input.ctrl() => context.history_down(),
+            /*Input::ArrowRight if input.none() => {
+                if let Summary::Partial(partial, rest) = &summary {
+                    if context.edit.at_end() {
+                        context.edit = format!("{partial}{rest}").into();
+                        context.edit.to_end();
                     }
-                } else {
-                    buffer = last_buffer.take().unwrap_or_default();
                 }
+
+                context.edit.right(1);
             }
-            // ctrl+p
-            Input::Key('p') if input.ctrl() => {
-                history.next();
-
-                if let Some(item) = history.get() {
-                    if last_buffer.is_none() {
-                        last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
-                    } else {
-                        buffer = Buffer::from(item.clone());
-                    }
-                } else {
-                    buffer = last_buffer.take().unwrap_or_default();
-                }
-            }
-            Input::ArrowDown if input.none() => {
-                history.next_back();
-
-                if let Some(item) = history.get() {
-                    if last_buffer.is_none() {
-                        last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
-                    } else {
-                        buffer = Buffer::from(item.clone());
-                    }
-                } else {
-                    buffer = last_buffer.take().unwrap_or_default();
-                }
-            }
-            // ctrl+n
-            Input::Key('n') if input.ctrl() => {
-                history.next_back();
-
-                if let Some(item) = history.get() {
-                    if last_buffer.is_none() {
-                        last_buffer = Some(mem::replace(&mut buffer, Buffer::from(item.clone())));
-                    } else {
-                        buffer = Buffer::from(item.clone());
-                    }
-                } else {
-                    buffer = last_buffer.take().unwrap_or_default();
-                }
-            }
-            Input::ArrowLeft if input.none() => buffer.move_left(1),
-            Input::ArrowRight if input.none() => {
-                if let Summary::Partial(partial) = &summary {
-                    if buffer.is_at_end() {
-                        buffer = partial.clone().into();
-                        buffer.move_to_end();
-                    } else {
-                        buffer.move_right(1);
-                    }
-                } else {
-                    buffer.move_right(1);
-                }
-            }
-
-            // alt+enter
-            Input::Key('\r') if input.meta() => buffer.insert_at_cursor('\n'),
-
-            // ctrl+c
-            Input::Key('c') if input.ctrl() => buffer.clear(),
-
-            // ctrl+d
-            Input::Key('d') if input.ctrl() => break,
-
-            // ctrl+m aka return
-            Input::Key('m') if input.ctrl() => {
-                if !buffer.is_empty() {
-                    program = Some(mem::take(&mut buffer));
-                }
-            }
-
-            // ctrl+i aka tab
             Input::Key('i') if input.ctrl() => {
-                if let Summary::Partial(partial) = &summary {
-                    buffer = partial.clone().into();
-                    buffer.move_to_end();
+                if let Summary::Partial(partial, rest) = &summary {
+                    if context.edit.at_end() {
+                        context.edit = format!("{partial}{rest}").into();
+                        context.edit.to_end();
+                    }
+                }
+                context.edit.right(1);
+            }*/
+            Input::ArrowLeft if input.none() => context.prev(),
+            Input::ArrowRight if input.none() => context.next(),
+            Input::Key('c') if input.ctrl() => context.clear(),
+            Input::Key('d') if input.ctrl() => break,
+            Input::Key('m') if input.ctrl() => {
+                if !context.edit.is_empty() {
+                    context.execute_edit = true;
                 }
             }
+            Input::Key('w') if input.ctrl() => context.remove_word(WORD_CHARS),
+            Input::Key('k') if input.ctrl() => context.remove_end(),
 
-            // ctrl+w
-            Input::Key('w') if input.ctrl() => buffer.remove_word_at_cursor(),
+            Input::ArrowLeft if input.ctrl() => context.prev_word(WORD_CHARS),
+            Input::ArrowLeft if input.shift() => context.prev_word(WORD_CHARS),
+            Input::Key('b') if input.meta() => context.prev_word(WORD_CHARS),
 
-            // ctrl+k
-            Input::Key('k') if input.ctrl() => buffer.remove_right_of_cursor(),
+            Input::ArrowRight if input.ctrl() => context.next_word(WORD_CHARS),
+            Input::ArrowRight if input.shift() => context.next_word(WORD_CHARS),
+            Input::Key('f') if input.meta() => context.next_word(WORD_CHARS),
 
-            // shift+arrow left
-            Input::ArrowLeft if input.shift() => buffer.move_to_whitespace_left(),
-
-            // alt+b
-            Input::Key('b') if input.meta() => buffer.move_to_whitespace_left(),
-
-            // shift+arrow right
-            Input::ArrowRight if input.shift() => buffer.move_to_whitespace_right(),
-
-            // alt+f
-            Input::Key('f') if input.meta() => buffer.move_to_whitespace_right(),
-
-            Input::Backspace if input.none() => buffer.remove_at_cursor(),
-            Input::Space if input.none() => {
-                if !(buffer.is_empty() || buffer.ends_with_space()) {
-                    buffer.insert_at_cursor(' ');
-                }
-            }
-
-            // unfortunately it's `(pat | pat) if expr`, not `pat | (pat if expr)`
-            Input::Home if input.none() => buffer.move_to_start(),
-
-            // ctrl+a
-            Input::Key('a') if input.ctrl() => buffer.move_to_start(),
-
-            Input::End if input.none() => buffer.move_to_end(),
-
-            // ctrl+e
-            Input::Key('e') if input.ctrl() => buffer.move_to_end(),
-
-            Input::Key(key) if input.none() => buffer.insert_at_cursor(key),
-            Input::Paste(string) if input.none() => buffer.insert_str_at_cursor(&string),
+            Input::Backspace if input.none() => context.remove(),
+            Input::Space if input.none() => context.insert(' '),
+            Input::Home if input.none() => context.to_start(),
+            Input::Key('a') if input.ctrl() => context.to_start(),
+            Input::End if input.none() => context.to_end(),
+            Input::Key('e') if input.ctrl() => context.to_end(),
+            Input::Key(key) if input.none() => context.insert(key),
+            Input::Paste(string) if input.none() => context.insert_str(&string),
             _ => {}
         }
 
-        if let Some(program) = program.take() {
-            let program_clone = program.clone();
+        let command = context
+            .should_execute()
+            .and_then(|_| context.command().ok());
 
-            history.reset();
-            history.push(program_clone.into());
+        if let Some(command) = command {
+            match command.program.as_str() {
+                "exit" => {
+                    break;
+                }
+                "cd" => {
+                    let target_dir = command
+                        .args
+                        .get(0)
+                        .map(|arg| arg.as_str())
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| context.home_dir.clone());
 
-            if let Some((program, mut args)) = program.split_program() {
-                match program {
-                    "cd" => {
-                        if let Some(dir) = args.next() {
-                            let dir = match env::var("HOME").ok() {
-                                Some(home) => dir.replace("~", &home),
-                                None => dir.to_string(),
-                            };
+                    let result = context.change_dir(&target_dir);
 
-                            if tokio::fs::metadata(&dir).await.is_ok() {
-                                let _ = std::env::set_current_dir(dir);
-                            }
-                        } else if let Some(home) = env::var_os("HOME") {
-                            let _ = std::env::set_current_dir(home);
+                    match result {
+                        Err(error) if error.kind() == ErrorKind::NotFound => {
+                            let edit = format!(
+                                "\relysh: `{}` no such file or directory\r\n",
+                                target_dir.display()
+                            );
+
+                            context.session.write_all(edit.as_bytes()).await?;
                         }
-
-                        session.write_all(b"\x1b[A").await?;
-                        let status = before_prompt().await;
-                        session.write_str_all(&status).await?;
-                    }
-                    "showkeys" => {
-                        showkeys = !showkeys;
-                    }
-                    _ => {
-                        session.write_all(b"\n\r").await?;
-                        // disable bracketed paste mode
-                        session.write_all(b"\x1b[?2004l").await?;
-                        session.set_cooked()?;
-                        session.set_blocking()?;
-
-                        let result = Command::new(program).args(args).spawn();
-                        let result = match result {
-                            Ok(mut child) => match child.wait().await {
-                                Ok(_status) => Ok(()),
-                                Err(error) => Err(error),
-                            },
-                            Err(error) => {
-                                let dir = match env::var("HOME").ok() {
-                                    Some(home) => program.replace("~", &home),
-                                    None => program.to_string(),
-                                };
-
-                                if tokio::fs::metadata(&dir).await.is_ok() {
-                                    let _ = std::env::set_current_dir(dir);
-
-                                    session.set_raw()?;
-                                    session.set_nonblocking()?;
-
-                                    session.write_all(b"\x1b[2A").await?;
-                                    let status = before_prompt().await;
-                                    session.write_str_all(&status).await?;
-
-                                    continue;
-                                } else {
-                                    Err(error)
-                                }
-                            }
-                        };
-
-                        if let Err(_result) = result {
-                            session.write_all(b"\rchild process died\n\r").await?;
-                        }
-
-                        session.set_raw()?;
-                        session.set_nonblocking()?;
-                        // enable bracketed paste mode
-                        session.write_all(b"\x1b[?2004h").await?;
-                        session.write_all(b"\n").await?;
-                        let status = before_prompt().await;
-                        session.write_str_all(&status).await?;
+                        _ => {}
                     }
                 }
+                "showkeys" => {
+                    context.toggle_showkeys();
+                }
+                _ => {
+                    let target_dir = PathBuf::from(command.program.as_str());
+
+                    context.session.write_all(b"\r\n").await?;
+
+                    let result = match context.spawn(&command).await {
+                        Ok(ok) => Ok(ok),
+                        Err(_error) => {
+                            let target_dir = context.expand_path(&target_dir);
+
+                            match context.change_dir(&target_dir) {
+                                Ok(()) => Ok(Ok(())),
+                                Err(error) => Err(error),
+                            }
+                        }
+                    };
+
+                    match result {
+                        Err(error) if error.kind() == ErrorKind::NotFound => {
+                            let edit = format!(
+                                "\relysh: `{}` no such file or directory\r\n",
+                                target_dir.display()
+                            );
+
+                            context.session.write_all(edit.as_bytes()).await?;
+                        }
+                        _ => {}
+                    }
+
+                    context.pre_prompt().await?;
+                }
             }
+
+            context.clear_and_record();
         }
     }
 
-    let _ = history.save().await;
-
-    // disable bracketed paste mode
-    session.write_all(b"\x1b[?2004l").await?;
-    session.write_all(b"\n").await?;
+    context.session.write_all(b"\r\n").await?;
+    context.save_history().await;
+    context.disable_raw().await?;
 
     Ok(())
 }

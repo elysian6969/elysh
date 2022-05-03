@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
-use std::path::PathBuf;
-use std::{env, io};
+use std::io;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 #[derive(Debug)]
@@ -10,44 +10,59 @@ pub struct History {
 }
 
 impl History {
-    /// Construct a new instance of History.
-    pub const fn new() -> Self {
+    const NEW: Self = {
         let history = Vec::new();
         let position = 0;
 
         Self { history, position }
+    };
+
+    /// Construct a new history!
+    #[inline]
+    pub async fn new<P>(data_dir: P) -> Self
+    where
+        P: AsRef<Path>,
+    {
+        Self::load(data_dir).await.unwrap_or_else(|_| Self::NEW)
     }
 
     /// Returns the count of history items.
+    #[inline]
     pub fn len(&self) -> usize {
         self.history.len()
     }
 
     /// Returns the current position within the history list.
+    #[inline]
     pub fn position(&self) -> isize {
         self.position
     }
 
     /// Append a new item to the history list.
+    #[inline]
     pub fn push(&mut self, item: String) {
         self.history.push(item);
     }
 
     /// Increment the position within the history list.
+    #[inline]
     pub fn next(&mut self) {
         self.position = self.position.saturating_add(1).min(self.len() as isize);
     }
 
     /// Decrement the position within the history list.
+    #[inline]
     pub fn next_back(&mut self) {
         self.position = self.position.saturating_sub(1).max(-(self.len() as isize));
     }
 
     /// Reset the position.
+    #[inline]
     pub fn reset(&mut self) {
         self.position = 0;
     }
 
+    #[inline]
     pub fn get(&self) -> Option<&String> {
         match self.position.cmp(&0) {
             Ordering::Greater => {
@@ -68,25 +83,13 @@ impl History {
         }
     }
 
-    pub fn path() -> PathBuf {
-        let mut home = env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"));
-
-        let mut xdg_data_home = env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                home.push(".local/share");
-                home
-            });
-
-        xdg_data_home.push("elysh/history");
-        xdg_data_home
-    }
-
-    pub async fn load() -> io::Result<Self> {
-        let path = History::path();
-        let history = fs::read_to_string(&path)
+    #[inline]
+    async fn load<P>(data_dir: P) -> io::Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        let path = history_path(data_dir);
+        let history = fs::read_to_string(path)
             .await?
             .lines()
             .map(String::from)
@@ -98,20 +101,28 @@ impl History {
         })
     }
 
-    pub async fn save(&self) -> io::Result<()> {
-        let path = History::path();
-        let parent = unsafe { path.parent().unwrap_unchecked() };
+    #[inline]
+    pub async fn save<P>(&self, data_dir: P) -> io::Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        let path = history_path(data_dir.as_ref());
         let history = self.history.join("\n");
+        let _ = fs::create_dir_all(data_dir).await;
 
-        let _ = fs::create_dir_all(&parent).await;
-        fs::write(&path, history.as_bytes()).await?;
+        fs::write(path, history.as_bytes()).await?;
 
         Ok(())
     }
 }
 
-impl Default for History {
-    fn default() -> Self {
-        Self::new()
-    }
+#[inline]
+fn history_path<P>(data_dir: P) -> PathBuf
+where
+    P: AsRef<Path>,
+{
+    let mut path = data_dir.as_ref().to_path_buf();
+
+    path.push("history");
+    path
 }

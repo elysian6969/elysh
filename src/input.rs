@@ -95,6 +95,7 @@ impl Input {
 }
 
 impl fmt::Debug for Input {
+    #[inline]
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let has_fields = matches!(self, Input::Key(_) | Input::Paste(_));
         let has_mod = !self.none();
@@ -127,6 +128,7 @@ impl fmt::Debug for Input {
     }
 }
 
+#[inline]
 pub fn map(bytes: &[u8]) -> Option<Input> {
     let input = match bytes.len() {
         1 => match unsafe { bytes.get_unchecked(0) } {
@@ -166,10 +168,15 @@ pub fn map(bytes: &[u8]) -> Option<Input> {
             _ => return None,
         },
         6 => match unsafe { bytes.get_unchecked(..6) } {
+            b"\x1b[1;2A" => Input::ArrowUp.with_shift(),
+            b"\x1b[1;2B" => Input::ArrowDown.with_shift(),
+            b"\x1b[1;2C" => Input::ArrowRight.with_shift(),
+            b"\x1b[1;2D" => Input::ArrowLeft.with_shift(),
+
             b"\x1b[1;5A" => Input::ArrowUp.with_shift(),
-            b"\x1b[1;5B" => Input::ArrowDown.with_shift(),
-            b"\x1b[1;5C" => Input::ArrowRight.with_shift(),
-            b"\x1b[1;5D" => Input::ArrowLeft.with_shift(),
+            b"\x1b[1;5B" => Input::ArrowDown.with_ctrl(),
+            b"\x1b[1;5C" => Input::ArrowRight.with_ctrl(),
+            b"\x1b[1;5D" => Input::ArrowLeft.with_ctrl(),
             _ => return None,
         },
         _ => match bytes.strip_prefix(b"\x1b[200~") {
