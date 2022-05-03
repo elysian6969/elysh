@@ -352,7 +352,11 @@ async fn main() -> io::Result<()> {
                             let target_dir = context.expand_path(&target_dir);
 
                             match context.change_dir(&target_dir) {
-                                Ok(()) => Ok(Ok(())),
+                                Ok(()) => {
+                                    context.session.write_all(b"\x1b[3A").await?;
+
+                                    Ok(Ok(()))
+                                },
                                 Err(error) => Err(error),
                             }
                         }
@@ -370,7 +374,6 @@ async fn main() -> io::Result<()> {
                         _ => {}
                     }
 
-                    context.session.write_all(b"\x1b[3A").await?;
                     context.pre_prompt().await?;
                 }
             }
