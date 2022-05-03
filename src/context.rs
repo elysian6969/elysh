@@ -123,11 +123,12 @@ impl Context {
         P: AsRef<Path>,
     {
         let path = path.as_ref();
-
-        match path.strip_prefix(&self.home_dir) {
+        let path = match path.strip_prefix(&self.home_dir) {
             Ok(rest) => Path::new("~").join(rest),
             Err(_error) => path.to_path_buf(),
-        }
+        };
+
+        path.components().collect()
     }
 
     /// Substitute `~` for `HOME`.
@@ -139,11 +140,12 @@ impl Context {
         P: AsRef<Path>,
     {
         let path = path.as_ref();
-
-        match path.strip_prefix("~") {
+        let path = match path.strip_prefix("~") {
             Ok(rest) => self.home_dir.join(rest),
             Err(_error) => path.to_path_buf(),
-        }
+        };
+        
+        path.components().collect()
     }
 
     /// Enable raw mode for all sorts of fancy terminalisms.
@@ -373,7 +375,9 @@ impl Context {
         let target_dir = self.expand_path(target_dir);
         let result = std::env::set_current_dir(&target_dir);
 
-        result.map(|_| self.current_dir = target_dir)
+        result
+            .and_then(|_| std::env::current_dir())
+            .map(|target_dir| self.current_dir = target_dir)
     }
 
     #[inline]

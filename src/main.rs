@@ -334,6 +334,9 @@ async fn main() -> io::Result<()> {
                         }
                         _ => {}
                     }
+
+                    context.session.write_all(b"\x1b[2A").await?;
+                    context.pre_prompt().await?;
                 }
                 "showkeys" => {
                     context.toggle_showkeys();
@@ -367,6 +370,7 @@ async fn main() -> io::Result<()> {
                         _ => {}
                     }
 
+                    context.session.write_all(b"\x1b[3A").await?;
                     context.pre_prompt().await?;
                 }
             }
@@ -375,9 +379,9 @@ async fn main() -> io::Result<()> {
         }
     }
 
-    context.session.write_all(b"\r\n").await?;
     context.save_history().await;
     context.disable_raw().await?;
+    context.session.write_all(b"\r\n\n[elysh exited]\r\n").await?;
 
     Ok(())
 }
